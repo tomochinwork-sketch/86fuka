@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>iPad AI 手势福卡</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tsparticles@2.12.0/tsparticles.bundle.min.js"></script>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Long+Cang&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            margin: 0; padding: 0; background-color: #0a0a0a;
+            background-image: url('assets/default_bg.jpg'); 
+            background-repeat: no-repeat; background-position: center; background-size: cover;
+            overflow: hidden; height: 100vh; width: 100vw;
+            display: flex; justify-content: center; align-items: center;
+            transition: background 0.8s ease-in-out;
+            touch-action: none; /* 防止 iPad 缩放干扰 */
+        }
+        #tsparticles { position: absolute; width: 100%; height: 100%; z-index: 5; pointer-events: none; }
+        #video-container { display: none; }
+        #status-bar {
+            position: absolute; bottom: 5%; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.8); color: #ffd700; padding: 12px 30px;
+            border-radius: 30px; font-size: 16px; text-align: center; z-index: 1000;
+            border: 1px solid rgba(255,215,0,0.4); backdrop-filter: blur(8px);
+            width: 80%; max-width: 400px;
+        }
+        #app { position: relative; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; z-index: 10; }
+        .card {
+            position: absolute; width: 60px; height: 85px; background: #d62f2f; 
+            border: 2px solid #ffd700; border-radius: 8px; display: flex; 
+            align-items: center; justify-content: center; font-size: 28px; color: #ffd700; pointer-events: none;
+        }
+        #main-card {
+            position: absolute; width: 85vw; height: 70vh; max-width: 400px; max-height: 580px;
+            background: radial-gradient(circle, #e62e2e, #8b0000);
+            border: 6px double #ffd700; border-radius: 20px;
+            display: none; z-index: 100; box-shadow: 0 0 80px rgba(0, 0, 0, 0.9);
+        }
+        .fu-main { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); font-size: 180px; color: #ffd700; font-family: 'Ma Shan Zheng', cursive; }
+        .fu-name { position: absolute; left: 30px; top: 50%; transform: translateY(-50%); writing-mode: vertical-rl; text-orientation: upright; font-size: 80px; color: #ffd700; font-family: 'Long Cang', cursive; border-right: 2px solid rgba(255,215,0,0.4); padding-right: 15px; height: 80%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="tsparticles"></div>
+<div id="video-container"><video id="video-preview" playsinline></video></div>
+<div id="status-bar">iPad 环境初始化中...</div>
+
+<div id="app">
+    <div id="ring"></div>
+    <div id="main-card">
+        <div id="target-name" class="fu-name">顺脉福</div>
+        <div id="target-main" class="fu-main">福</div>
+    </div>
+</div>
+
+<script>
+    const videoElement = document.getElementById('video-preview');
+    const statusBar = document.getElementById('status-bar');
+    const ring = document.getElementById('ring');
+    const mainCard = document.getElementById('main-card');
+    const targetName = document.getElementById('target-name');
+    const targetMain = document.getElementById('target-main');
+
+    let currentScale = 1.0, targetScale = 1.0;
+    let isMerged = false, cards = [];
+    let particlesContainer, particleEmitter;
+
+    const fontPool = ["'Ma Shan Zheng', cursive", "'Long Cang', cursive"];
+    const fuData = Array.from({length: 10}, (_, i) => ({ 
+        name: ["顺脉福", "喜娩福", "康乐福", "健骨福", "明眼福", "洁齿福", "速安福", "调衡福", "清神福", "康愈福"][i], 
+        bg: `assets/bg_${i+1}.jpg` 
+    }));
+
+    async function initParticles() {
+        particlesContainer = await tsParticles.load("tsparticles", {
+            fpsLimit: 30, // iPad 节能
+            particles: {
+                number: { value: 0 },
+                color: { value: "#FFD700" },
+                size: { value: { min: 1, max: 4 } },
+                move: { enable: true, speed: 4, outModes: "destroy" }
+            },
+            emitters: { rate: { quantity: 4, delay: 0.1 }, position: { x: 50, y: 50 } }
+        });
+        particleEmitter = particlesContainer.plugins.get("emitters").array[0];
+    }
+
+    function initRing() {
+        ring.innerHTML = ''; cards = [];
+        for (let i = 0; i < 8; i++) {
+            const el = document.createElement('div');
+            el.className = 'card'; el.innerHTML = '福';
+            el.style.fontFamily = fontPool[Math.floor(Math.random() * fontPool.length)];
+            ring.appendChild(el);
+            cards.push({ el, angle: (i / 8) * Math.PI * 2 });
+        }
+    }
+
+    const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+    
+    // iPad 性能优化
+    hands.setOptions({ 
+        maxNumHands: 1, 
+        modelComplexity: 0, // 降级模型，极大提升 iPad 响应速度
+        minDetectionConfidence: 0.5, 
+        minTrackingConfidence: 0.5 
+    });
+
+    hands.onResults((results) => {
+        if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+            statusBar.innerText = "👋 请面向摄像头举手";
+            targetScale = 1.0;
+            if (particleEmitter) particleEmitter.pause();
+            return;
+        }
+
+        const landmarks = results.multiHandLandmarks[0];
+        const indexTip = landmarks[8]; 
+
+        if (particleEmitter) {
+            particleEmitter.play();
+            // iPad 横竖屏坐标修正：前置摄像头在 iPad 上的感应通常需要镜像处理
+            particleEmitter.options.position.x = (1 - indexTip.x) * 100;
+            particleEmitter.options.position.y = indexTip.y * 100;
+        }
+
+        const dist = Math.hypot(landmarks[4].x - landmarks[8].x, landmarks[4].y - landmarks[8].y);
+
+        if (!isMerged) {
+            statusBar.innerText = "🎯 捏合手指聚拢";
+            if (dist > 0.2) {
+                targetScale = 1.0;
+            } else {
+                targetScale = (dist - 0.03) / 0.17; 
+                targetScale = Math.max(0.01, Math.min(1.0, targetScale));
+            }
+            if (targetScale < 0.12) triggerMerge();
+        } else {
+            statusBar.innerText = "✨ 大幅张开手指刷新";
+            if (dist > 0.35) resetGame(); // iPad 识别范围广，稍微提高阈值
+        }
+    });
+
+    const camera = new Camera(videoElement, {
+        onFrame: async () => { await hands.send({image: videoElement}); },
+        width: 640, height: 480
+    });
+
+    function triggerMerge() {
+        isMerged = true;
+        cards.forEach(c => c.el.style.display = 'none');
+        const res = fuData[Math.floor(Math.random() * fuData.length)];
+        const font = fontPool[Math.floor(Math.random() * fontPool.length)];
+        targetName.innerText = res.name;
+        targetName.style.fontFamily = font;
+        targetMain.style.fontFamily = font;
+
+        const img = new Image();
+        img.src = res.bg;
+        img.onload = () => document.body.style.backgroundImage = `url('${res.bg}')`;
+        img.onerror = () => document.body.style.backgroundImage = "url('assets/default_bg.jpg')";
+
+        mainCard.style.display = 'block';
+        if (particleEmitter) particleEmitter.pause();
+    }
+
+    function resetGame() {
+        isMerged = false; 
+        currentScale = 1.3;
+        targetScale = 1.0;
+        mainCard.style.display = 'none';
+        document.body.style.backgroundImage = "url('assets/default_bg.jpg')";
+        initRing();
+    }
+
+    let rotation = 0;
+    function animate() {
+        if (!isMerged) {
+            rotation += 0.005;
+            currentScale += (targetScale - currentScale) * 0.15; // 稍微调快 iPad 响应速度
+            cards.forEach(item => {
+                const r = (window.innerWidth * 0.3) * currentScale; // 根据 iPad 宽度适配圆环大小
+                const currA = item.angle + rotation;
+                item.el.style.transform = `translate(${Math.cos(currA)*r}px, ${Math.sin(currA)*r}px) rotate(${currA + 1.57}rad)`;
+            });
+        }
+        requestAnimationFrame(animate);
+    }
+
+    window.onload = async () => {
+        initRing();
+        animate();
+        await initParticles();
+        // iPad 启动摄像头需要用户交互触发（有些 App 强制要求）
+        statusBar.innerText = "点击屏幕启动 AI 视觉";
+        document.body.addEventListener('click', () => {
+            camera.start().then(() => statusBar.innerText = "✅ AI 已就绪");
+        }, {once: true});
+    };
+</script>
+</body>
+</html>
